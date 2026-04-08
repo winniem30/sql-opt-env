@@ -9,10 +9,6 @@ app = FastAPI(title="SQL Query Optimization OpenEnv")
 env = SQLOptEnv()
 
 
-class ResetRequest(BaseModel):
-    task_id: Optional[str] = None
-
-
 class StepRequest(BaseModel):
     query: str
     explanation: Optional[str] = None
@@ -49,8 +45,7 @@ def tasks():
 
 
 @app.post("/reset")
-def reset(payload: Optional[ResetRequest] = None):
-    task_id = payload.task_id if payload else None
+def reset(task_id: Optional[str] = None):
     observation = env.reset(task_id=task_id)
     return {"observation": observation.model_dump()}
 
