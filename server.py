@@ -49,13 +49,8 @@ def tasks():
 
 
 @app.post("/reset")
-async def reset(request: Request):
-    try:
-        data = await request.json()
-        task_id = data.get("task_id")
-    except:
-        task_id = None
-    observation = env.reset(task_id=task_id)
+def reset():
+    observation = env.reset()
     return {"observation": observation.model_dump()}
 
 
