@@ -1,0 +1,121 @@
+name: sql-query-optimizer
+version: "1.0.0"
+description: >
+  An RL environment where AI agents learn to rewrite slow SQL queries into
+  efficient, production-grade ones. Simulates a real database engineering task:
+  given a query with anti-patterns (SELECT *, correlated subqueries, missing
+  index usage), the agent must iteratively optimize it using modern SQL
+  constructs (CTEs, window functions, proper JOINs).
+
+domain: database-engineering
+tags:
+  - sql
+  - query-optimization
+  - database
+  - data-engineering
+  - real-world
+  - openenv
+
+tasks:
+  - id: select_star_cleanup
+    difficulty: easy
+    description: "Remove SELECT *, unnecessary DISTINCT, add column specificity and is_active filter on 1M-row users table"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users]
+    original_cost: 20000.0
+
+  - id: n_plus_one_to_join
+    difficulty: medium
+    description: "Convert N+1 correlated subquery in SELECT to JOIN+GROUP BY or CTE on 1M users × 50M orders"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users, orders]
+    original_cost: 2000000.0
+
+  - id: window_function_rewrite
+    difficulty: hard
+    description: "Replace O(N²) nested correlated subqueries with window functions + CTE pipeline on 50M orders × 200M items"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users, orders, order_items]
+    original_cost: 1638400000.0
+
+observation_space:
+  type: object
+  description: "Full task context + execution feedback + reward signals"
+  fields:
+    task_id:               {type: string}
+    difficulty:            {type: string, enum: [easy, medium, hard]}
+    description:           {type: string}
+    schemas:               {type: array, items: TableSchema}
+    original_query:        {type: string}
+    current_query:         {type: string}
+    step_number:           {type: integer, range: [0, 10]}
+    max_steps:             {type: integer, value: 10}
+    syntax_valid:          {type: boolean}
+    execution_error:       {type: string, nullable: true}
+    query_plan:            {type: QueryPlan, nullable: true}
+    estimated_cost:        {type: float, nullable: true}
+    original_cost:         {type: float}
+    cost_improvement_ratio: {type: float, nullable: true, note: ">1 means improvement"}
+    rows_returned:         {type: integer, nullable: true}
+    issues_found:          {type: array, items: string}
+    hints:                 {type: array, items: string, note: "shown for steps 1-3 only"}
+    last_reward:           {type: float, range: [-0.05, 1.0]}
+    cumulative_reward:     {type: float}
+
+action_space:
+  type: object
+  fields:
+    query:
+      type: string
+      required: true
+      description: "The optimized SQL query to submit (must start with SELECT or WITH)"
+    explanation:
+      type: string
+      required: false
+      description: "Optional explanation of applied optimizations"
+
+reward:
+  range: [-0.05, 1.0]
+  shaped: true
+  dense: true
+  components:
+    grade_component:
+      weight: 0.60
+      description: "Semantic correctness + optimization pattern score from task grader"
+    cost_component:
+      weight: 0.30
+      description: "Execution plan cost improvement, capped at 10× baseline"
+    progress_bonus:
+      weight: 0.10
+      description: "Step-over-step grade improvement delta"
+  penalties:
+    syntax_error:  -0.05
+    regression:    -0.03
+
+endpoints:
+  health:  "GET  /health"
+  tasks:   "GET  /tasks"
+  reset:   "POST /reset"
+  step:    "POST /step"
+  state:   "GET  /state"
+
+docker:
+  image: sql-opt-env
+  port: 7860
+  base: python:3.11-slim
+
+huggingface:
+  space_sdk: docker
+  suggested_hardware: cpu-basic
+  tags: [openenv, sql, rl-environment]
+
+baseline:
+  model: "Qwen/Qwen2.5-72B-Instruct"
+  scores:
+    select_star_cleanup:     ~0.75
+    n_plus_one_to_join:      ~0.65
+    window_function_rewrite: ~0.45
+  average: ~0.62
