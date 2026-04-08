@@ -23,6 +23,15 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/")
+def root():
+    return {
+        "status": "ok",
+        "message": "SQL Optimization OpenEnv is running.",
+        "endpoints": ["/health", "/tasks", "/reset", "/step", "/state"],
+    }
+
+
 @app.get("/tasks")
 def tasks():
     return {
