@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SQL Query Optimizer — OpenEnv</title>
+<style>
+  /* ── Fonts ─────────────────────────────────────────────────────────── */
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;600;700;800&display=swap');
+
+  /* ── Design tokens ──────────────────────────────────────────────────── */
+  :root {
+    --ink:       #0d0e12;
+    --ink-mid:   #232530;
+    --ink-soft:  #3a3d4a;
+    --mist:      #f0f1f5;
+    --mist-dark: #e2e4eb;
+    --accent:    #f7c25e;
+    --accent2:   #5eeac2;
+    --danger:    #ff6b6b;
+    --pass:      #4ddb8a;
+    --warn:      #f7a35e;
+    --easy:      #4ddb8a;
+    --medium:    #f7c25e;
+    --hard:      #ff6b6b;
+    --radius:    8px;
+    --mono:      'DM Mono', 'Courier New', monospace;
+    --sans:      'Syne', system-ui, sans-serif;
+  }
+
+  /* ── Reset ──────────────────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 14px; }
+  body {
+    font-family: var(--sans);
+    background: var(--ink);
+    color: var(--mist);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid noise texture ─────────────────────────────────────────────── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(247,194,94,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(247,194,94,.03) 1px, transparent 1px);
+    background-size: 48px 48px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Layout ──────────────────────────────────────────────────────────── */
+  .shell {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-rows: 56px 1fr;
+    grid-template-columns: 280px 1fr;
+    height: 100vh;
+  }
+
+  /* ── Topbar ──────────────────────────────────────────────────────────── */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px;
+    background: rgba(13,14,18,.92);
+    border-bottom: 1px solid rgba(247,194,94,.15);
+    backdrop-filter: blur(12px);
+  }
+  .topbar-logo {
+    font-size: 1.1rem; font-weight: 800; letter-spacing: -.5px;
+    color: var(--accent);
+  }
+  .topbar-logo span { color: var(--mist); font-weight: 400; }
+  .topbar-badge {
+    font-family: var(--mono); font-size: .68rem;
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(247,194,94,.12); color: var(--accent);
+    border: 1px solid rgba(247,194,94,.25);
+  }
+  .topbar-spacer { flex: 1; }
+  .server-status {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--mono); font-size: .7rem; color: #888;
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #666; transition: background .3s;
+  }
+  .status-dot.online { background: var(--pass); box-shadow: 0 0 8px var(--pass); }
+  .status-dot.error  { background: var(--danger); }
+
+  /* ── Sidebar ─────────────────────────────────────────────────────────── */
+  .sidebar {
+    background: var(--ink-mid);
+    border-right: 1px solid rgba(255,255,255,.06);
+    overflow-y: auto;
+    display: flex; flex-direction: column; gap: 0;
+  }
+  .sidebar-section {
+    padding: 20px 16px 12px;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+  }
+  .sidebar-label {
+    font-size: .65rem; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; color: #666;
+    margin-bottom: 10px;
+  }
+
+  /* Task cards */
+  .task-card {
+    padding: 12px 14px; border-radius: var(--radius);
+    border: 1px solid transparent;
+    cursor: pointer; margin-bottom: 6px;
+    transition: all .2s;
+    background: rgba(255,255,255,.03);
+  }
+  .task-card:hover { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.1); }
+  .task-card.active { background: rgba(247,194,94,.08); border-color: rgba(247,194,94,.3); }
+  .task-card-title { font-size: .8rem; font-weight: 600; margin-bottom: 4px; }
+  .task-card-meta  { display: flex; align-items: center; gap: 6px; }
+  .diff-badge {
+    font-family: var(--mono); font-size: .6rem; padding: 1px 6px;
+    border-radius: 4px; font-weight: 500;
+  }
+  .diff-easy   { background: rgba(77,219,138,.15); color: var(--easy); }
+  .diff-medium { background: rgba(247,194,94,.15); color: var(--medium); }
+  .diff-hard   { background: rgba(255,107,107,.15); color: var(--hard); }
+
+  /* Stats */
+  .stat-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .stat-label { font-size: .72rem; color: #888; }
+  .stat-val   { font-family: var(--mono); font-size: .72rem; color: var(--mist); }
+  .stat-val.good { color: var(--pass); }
+  .stat-val.warn { color: var(--warn); }
+  .stat-val.bad  { color: var(--danger); }
+
+  /* Server URL */
+  .url-input {
+    width: 100%; padding: 8px 10px;
+    background: var(--ink); border: 1px solid rgba(255,255,255,.1);
+    border-radius: var(--radius); color: var(--mist);
+    font-family: var(--mono); font-size: .72rem;
+    outline: none; transition: border-color .2s;
+  }
+  .url-input:focus { border-color: var(--accent); }
+
+  /* ── Main area ───────────────────────────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  .pane {
+    display: flex; flex-direction: column;
+    overflow: hidden; position: relative;
+  }
+  .pane + .pane { border-top: 1px solid rgba(255,255,255,.06); }
+
+  .pane-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px;
+    background: rgba(13,14,18,.6);
+    border-bottom: 1px solid rgba(255,255,255,.06);
+    flex-shrink: 0;
+  }
+  .pane-title {
+    font-size: .72rem; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #888;
+  }
+  .pane-spacer { flex: 1; }
+
+  /* ── Query editor ────────────────────────────────────────────────────── */
+  .editor-wrap {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    flex: 1; overflow: hidden;
+    background: rgba(255,255,255,.04);
+  }
+  .editor-panel {
+    display: flex; flex-direction: column;
+    background: var(--ink);
+    overflow: hidden;
+  }
+  .editor-panel-header {
+    padding: 8px 16px;
+    background: rgba(255,255,255,.03);
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    font-size: .65rem; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #555;
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+  }
+  .editor-panel-header .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ink-soft);
+  }
+  .editor-panel-header .dot.red    { background: #ff5f57; }
+  .editor-panel-header .dot.yellow { background: #febc2e; }
+  .editor-panel-header .dot.green  { background: #28c840; }
+  textarea.code {
+    flex: 1; resize: none; outline: none;
+    background: transparent; border: none;
+    font-family: var(--mono); font-size: .8rem; line-height: 1.7;
+    color: var(--mist); padding: 16px;
+    overflow-y: auto;
+  }
+  textarea.code::placeholder { color: #444; }
+
+  /* ── Feedback panel ──────────────────────────────────────────────────── */
+  .feedback-area {
+    flex: 1; overflow-y: auto;
+    padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;
+  }
+
+  .feedback-section-title {
+    font-size: .65rem; font-weight: 700; letter-spacing: 1px;
+    text-transform: uppercase; color: #555; margin-bottom: 6px;
+  }
+
+  .issue-item, .hint-item, .passed-item {
+    font-size: .78rem; line-height: 1.5;
+    padding: 8px 12px; border-radius: 6px;
+    font-family: var(--mono);
+  }
+  .issue-item  { background: rgba(255,107,107,.08); color: #ff9e9e; border-left: 3px solid var(--danger); }
+  .hint-item   { background: rgba(94,234,194,.06);  color: #90f0d8; border-left: 3px solid var(--accent2); }
+  .passed-item { background: rgba(77,219,138,.08);  color: #87efb3; border-left: 3px solid var(--pass); }
+
+  /* Plan card */
+  .plan-card {
+    padding: 12px 14px; border-radius: var(--radius);
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.07);
+    font-family: var(--mono); font-size: .75rem;
+  }
+  .plan-type {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: .68rem; font-weight: 600; margin-bottom: 8px;
+    background: rgba(247,194,94,.12); color: var(--accent);
+  }
+  .plan-row { display: flex; justify-content: space-between; color: #888; margin-top: 4px; }
+  .plan-row span:last-child { color: var(--mist); }
+
+  /* ── Reward chart ────────────────────────────────────────────────────── */
+  .chart-wrap {
+    flex: 1; padding: 8px 20px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    overflow: hidden;
+  }
+  #rewardChart { width: 100%; flex: 1; }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 16px; border-radius: 6px; border: none;
+    font-family: var(--sans); font-size: .78rem; font-weight: 600;
+    cursor: pointer; transition: all .15s; user-select: none;
+  }
+  .btn-primary {
+    background: var(--accent); color: var(--ink);
+  }
+  .btn-primary:hover { background: #ffd07a; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-ghost {
+    background: rgba(255,255,255,.06); color: var(--mist);
+    border: 1px solid rgba(255,255,255,.1);
+  }
+  .btn-ghost:hover { background: rgba(255,255,255,.1); }
+  .btn-danger-ghost {
+    background: rgba(255,107,107,.08); color: var(--danger);
+    border: 1px solid rgba(255,107,107,.2);
+  }
+  .btn-danger-ghost:hover { background: rgba(255,107,107,.15); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+
+  /* ── Reward bar ──────────────────────────────────────────────────────── */
+  .reward-display {
+    display: flex; align-items: center; gap: 12px;
+  }
+  .reward-num {
+    font-family: var(--mono); font-size: 1.3rem; font-weight: 500;
+    color: var(--accent); min-width: 48px;
+  }
+  .reward-bar-bg {
+    flex: 1; height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,.08);
+  }
+  .reward-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    transition: width .4s cubic-bezier(.34,1.56,.64,1);
+    width: 0%;
+  }
+
+  /* ── Toast ───────────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+    padding: 12px 18px; border-radius: 8px;
+    font-size: .8rem; font-weight: 600;
+    background: var(--ink-mid); border: 1px solid rgba(255,255,255,.12);
+    transform: translateY(80px); opacity: 0;
+    transition: all .3s cubic-bezier(.34,1.56,.64,1);
+    max-width: 360px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--pass); color: var(--pass); }
+  #toast.error   { border-color: var(--danger); color: var(--danger); }
+  #toast.info    { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Log panel ───────────────────────────────────────────────────────── */
+  .log-area {
+    flex: 1; overflow-y: auto; padding: 8px 16px;
+    font-family: var(--mono); font-size: .72rem; line-height: 1.8;
+  }
+  .log-line { color: #666; }
+  .log-line.start  { color: var(--accent2); }
+  .log-line.step   { color: var(--mist); }
+  .log-line.end    { color: var(--accent); }
+  .log-line.err    { color: var(--danger); }
+
+  /* ── Score summary ───────────────────────────────────────────────────── */
+  .score-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    padding: 0 16px;
+  }
+  .score-cell {
+    padding: 10px 12px; border-radius: 6px;
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.07);
+    text-align: center;
+  }
+  .score-cell-label { font-size: .62rem; color: #666; text-transform: uppercase; letter-spacing: .8px; margin-bottom: 4px; }
+  .score-cell-val   { font-family: var(--mono); font-size: 1.1rem; color: var(--mist); }
+
+  /* ── Scrollbar ───────────────────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 2px; }
+
+  /* ── Spinner ─────────────────────────────────────────────────────────── */
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,.2);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Animations ──────────────────────────────────────────────────────── */
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  .animate-in { animation: fadeIn .3s ease forwards; }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ── Topbar ─────────────────────────────────────────────────────────── -->
+  <header class="topbar">
+    <div class="topbar-logo">SQLOpt<span>Env</span></div>
+    <div class="topbar-badge">OpenEnv v1.0</div>
+    <div class="topbar-badge" style="background:rgba(94,234,194,.1);color:var(--accent2);border-color:rgba(94,234,194,.25);">RL Environment</div>
+    <div class="topbar-spacer"></div>
+    <div class="server-status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">connecting…</span>
+    </div>
+  </header>
+
+  <!-- ── Sidebar ────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Server config -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Server URL</div>
+      <input class="url-input" id="serverUrl" value="http://localhost:7860" placeholder="http://localhost:7860">
+      <div style="margin-top:8px;display:flex;gap:6px;">
+        <button class="btn btn-ghost" style="flex:1;font-size:.7rem;" onclick="checkHealth()">Ping</button>
+        <button class="btn btn-ghost" style="flex:1;font-size:.7rem;" onclick="loadTasks()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Task selector -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Tasks</div>
+      <div id="taskList">
+        <!-- populated by JS -->
+        <div class="task-card active" data-id="select_star_cleanup">
+          <div class="task-card-title">select_star_cleanup</div>
+          <div class="task-card-meta"><span class="diff-badge diff-easy">easy</span></div>
+        </div>
+        <div class="task-card" data-id="n_plus_one_to_join">
+          <div class="task-card-title">n_plus_one_to_join</div>
+          <div class="task-card-meta"><span class="diff-badge diff-medium">medium</span></div>
+        </div>
+        <div class="task-card" data-id="window_function_rewrite">
+          <div class="task-card-title">window_function_rewrite</div>
+          <div class="task-card-meta"><span class="diff-badge diff-hard">hard</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Episode stats -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Episode Stats</div>
+      <div class="stat-row"><span class="stat-label">Step</span><span class="stat-val" id="statStep">—</span></div>
+      <div class="stat-row"><span class="stat-label">Last Reward</span><span class="stat-val" id="statReward">—</span></div>
+      <div class="stat-row"><span class="stat-label">Best Reward</span><span class="stat-val" id="statBest">—</span></div>
+      <div class="stat-row"><span class="stat-label">Cost Ratio</span><span class="stat-val" id="statCost">—</span></div>
+      <div class="stat-row"><span class="stat-label">Plan Type</span><span class="stat-val" id="statPlan">—</span></div>
+      <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val" id="statDone">—</span></div>
+    </div>
+
+    <!-- Score summary -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Reward History</div>
+      <canvas id="miniChart" height="70" style="width:100%;"></canvas>
+    </div>
+
+    <!-- Actions -->
+    <div class="sidebar-section" style="margin-top:auto">
+      <button class="btn btn-primary" style="width:100%;margin-bottom:8px;" onclick="doReset()" id="btnReset">
+        ↺ Reset Episode
+      </button>
+      <button class="btn btn-ghost" style="width:100%;margin-bottom:8px;" onclick="doStep()" id="btnStep" disabled>
+        ▶ Submit Query
+      </button>
+      <button class="btn btn-danger-ghost" style="width:100%;font-size:.7rem;" onclick="clearLog()">
+        Clear Log
+      </button>
+    </div>
+
+  </aside>
+
+  <!-- ── Main area ──────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- TOP: Query editors + schema -->
+    <div class="pane">
+      <div class="pane-header">
+        <span class="pane-title">Query Editor</span>
+        <div class="pane-spacer"></div>
+        <button class="btn btn-ghost" style="font-size:.7rem;padding:4px 10px;" onclick="copyQuery()">Copy</button>
+        <button class="btn btn-ghost" style="font-size:.7rem;padding:4px 10px;" onclick="pasteOriginal()">Paste Original</button>
+      </div>
+
+      <div class="editor-wrap">
+        <!-- Original query (read-only) -->
+        <div class="editor-panel">
+          <div class="editor-panel-header">
+            <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+            &nbsp;original.sql &nbsp;—&nbsp; <span style="color:var(--danger);font-size:.62rem;">SLOW</span>
+          </div>
+          <textarea class="code" id="originalQuery" readonly placeholder="Reset to load task…"></textarea>
+        </div>
+
+        <!-- Optimized query (editable) -->
+        <div class="editor-panel">
+          <div class="editor-panel-header">
+            <div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div>
+            &nbsp;optimized.sql &nbsp;—&nbsp; <span style="color:var(--accent2);font-size:.62rem;">YOUR REWRITE</span>
+          </div>
+          <textarea class="code" id="optimizedQuery"
+            placeholder="Paste or write your optimized SQL here, then click ▶ Submit Query…"
+            onkeydown="handleEditorKey(event)"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM: Feedback + log -->
+    <div class="pane">
+      <div class="pane-header">
+        <span class="pane-title">Feedback</span>
+        <div class="pane-spacer"></div>
+        <!-- Reward bar -->
+        <div class="reward-display" style="margin-right:8px;">
+          <span class="reward-num" id="rewardNum">0.00</span>
+          <div class="reward-bar-bg" style="width:160px;">
+            <div class="reward-bar-fill" id="rewardBarFill"></div>
+          </div>
+        </div>
+        <!-- Tab switcher -->
+        <button class="btn btn-ghost" style="font-size:.68rem;padding:4px 10px;" onclick="switchTab('feedback')" id="tabFeedback">Issues & Hints</button>
+        <button class="btn btn-ghost" style="font-size:.68rem;padding:4px 10px;" onclick="switchTab('log')" id="tabLog">Run Log</button>
+        <button class="btn btn-ghost" style="font-size:.68rem;padding:4px 10px;" onclick="switchTab('plan')" id="tabPlan">Query Plan</button>
+      </div>
+
+      <!-- Feedback tab -->
+      <div class="feedback-area" id="paneFeedback">
+        <div style="color:#444;font-family:var(--mono);font-size:.78rem;padding-top:20px;text-align:center;">
+          Reset to a task to begin
+        </div>
+      </div>
+
+      <!-- Log tab -->
+      <div class="log-area" id="paneLog" style="display:none;">
+        <div class="log-line" style="color:#555;"># Episode log — [START] / [STEP] / [END] format</div>
+      </div>
+
+      <!-- Plan tab -->
+      <div class="feedback-area" id="panePlan" style="display:none;">
+        <div style="color:#444;font-family:var(--mono);font-size:.78rem;padding-top:20px;text-align:center;">
+          Submit a query to see the execution plan
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════════
+const state = {
+  serverUrl:    'http://localhost:7860',
+  currentTask:  'select_star_cleanup',
+  step:         0,
+  done:         false,
+  rewards:      [],
+  bestReward:   0,
+  episodeLog:   [],
+  tasks:        [],
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════════
+function $(id) { return document.getElementById(id); }
+
+function toast(msg, type = 'info', duration = 3000) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = '', duration);
+}
+
+function setStatus(online, label) {
+  const dot  = $('statusDot');
+  const text = $('statusText');
+  dot.className  = 'status-dot ' + (online ? 'online' : 'error');
+  text.textContent = label;
+}
+
+function getUrl() {
+  return ($('serverUrl').value || 'http://localhost:7860').replace(/\/$/, '');
+}
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(getUrl() + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`HTTP ${res.status}: ${err}`);
+  }
+  return res.json();
+}
+
+function updateStat(id, val, cls = '') {
+  const el = $(id);
+  el.textContent = val;
+  el.className = 'stat-val' + (cls ? ' ' + cls : '');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SERVER HEALTH
+// ═══════════════════════════════════════════════════════════════════
+async function checkHealth() {
+  try {
+    const data = await apiFetch('/health');
+    setStatus(true, data.env + ' · ' + data.version);
+    toast('Server online ✓', 'success');
+  } catch (e) {
+    setStatus(false, 'offline');
+    toast('Cannot reach server: ' + e.message, 'error', 5000);
+  }
+}
+
+async function loadTasks() {
+  try {
+    const data = await apiFetch('/tasks');
+    state.tasks = data.tasks;
+    renderTaskList(data.tasks);
+  } catch(e) {
+    // silent — server may not be up yet
+  }
+}
+
+function renderTaskList(tasks) {
+  const list = $('taskList');
+  list.innerHTML = '';
+  tasks.forEach(t => {
+    const div = document.createElement('div');
+    div.className = 'task-card' + (t.task_id === state.currentTask ? ' active' : '');
+    div.dataset.id = t.task_id;
+    div.innerHTML = `
+      <div class="task-card-title">${t.task_id}</div>
+      <div class="task-card-meta">
+        <span class="diff-badge diff-${t.difficulty}">${t.difficulty}</span>
+      </div>`;
+    div.onclick = () => selectTask(t.task_id);
+    list.appendChild(div);
+  });
+}
+
+function selectTask(taskId) {
+  state.currentTask = taskId;
+  document.querySelectorAll('.task-card').forEach(c => {
+    c.classList.toggle('active', c.dataset.id === taskId);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RESET
+// ═══════════════════════════════════════════════════════════════════
+async function doReset() {
+  const btn = $('btnReset');
+  btn.innerHTML = '<span class="spinner"></span> Resetting…';
+  btn.disabled = true;
+
+  try {
+    const data = await apiFetch('/reset', {
+      method: 'POST',
+      body: JSON.stringify({ task_id: state.currentTask }),
+    });
+
+    const obs = data.observation;
+    state.step      = obs.step_number;
+    state.done      = data.done || false;
+    state.rewards   = [];
+    state.bestReward = 0;
+    state.episodeLog = [];
+
+    // Populate editors
+    $('originalQuery').value  = obs.original_query;
+    $('optimizedQuery').value = obs.original_query;
+
+    // Update sidebar stats
+    updateStat('statStep',  '0 / ' + obs.max_steps);
+    updateStat('statReward', '—');
+    updateStat('statBest',   '—');
+    updateStat('statCost',   '—');
+    updateStat('statPlan',   '—');
+    updateStat('statDone',   'running', 'good');
+
+    // Reset reward bar
+    $('rewardNum').textContent = '0.00';
+    $('rewardBarFill').style.width = '0%';
+
+    // Feedback panel
+    renderFeedback({
+      issues_found:  [],
+      hints:         obs.hints || [],
+      passed_checks: [],
+      description:   obs.description,
+    });
+
+    // Log
+    const logLine = `[START] task=${state.currentTask} env=sql_opt_env`;
+    addLogLine(logLine, 'start');
+    state.episodeLog = [logLine];
+
+    // Plan
+    $('panePlan').innerHTML = `<div style="color:#444;font-family:var(--mono);font-size:.78rem;padding-top:20px;text-align:center;">Submit a query to see the execution plan</div>`;
+
+    drawMiniChart();
+    $('btnStep').disabled = false;
+    toast('Episode reset — task: ' + state.currentTask, 'success');
+
+  } catch(e) {
+    toast('Reset failed: ' + e.message, 'error', 5000);
+    setStatus(false, 'offline');
+  } finally {
+    btn.innerHTML = '↺ Reset Episode';
+    btn.disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  STEP
+// ═══════════════════════════════════════════════════════════════════
+async function doStep() {
+  if (state.done) { toast('Episode finished — reset to continue', 'info'); return; }
+
+  const query = $('optimizedQuery').value.trim();
+  if (!query) { toast('Write a query first', 'error'); return; }
+
+  const btn = $('btnStep');
+  btn.innerHTML = '<span class="spinner"></span> Submitting…';
+  btn.disabled = true;
+
+  try {
+    const data = await apiFetch('/step', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    });
+
+    const obs    = data.observation;
+    const reward = data.reward ?? 0;
+    const done   = data.done ?? false;
+    const grade  = data.info?.grade || {};
+
+    state.step = obs.step_number;
+    state.done = done;
+    state.rewards.push(reward);
+    if (reward > state.bestReward) state.bestReward = reward;
+
+    // Update reward bar
+    const pct = Math.max(0, Math.min(100, reward * 100));
+    $('rewardBarFill').style.width = pct + '%';
+    $('rewardNum').textContent = reward.toFixed(2);
+
+    // Update stats
+    updateStat('statStep',   obs.step_number + ' / ' + obs.max_steps);
+    updateStat('statReward', reward.toFixed(3), reward >= 0.7 ? 'good' : reward >= 0.4 ? 'warn' : 'bad');
+    updateStat('statBest',   state.bestReward.toFixed(3), 'good');
+    const cr = obs.cost_improvement_ratio;
+    updateStat('statCost', cr ? cr.toFixed(2) + '×' : '—', cr && cr > 1 ? 'good' : '');
+    if (obs.query_plan) updateStat('statPlan', obs.query_plan.plan_type);
+    updateStat('statDone', done ? 'done' : 'running', done ? 'warn' : 'good');
+
+    // Render feedback
+    renderFeedback({
+      issues_found:  obs.issues_found || [],
+      hints:         obs.hints || [],
+      passed_checks: grade.passed_checks || [],
+      description:   obs.description,
+    });
+
+    // Render plan
+    if (obs.query_plan) renderPlan(obs.query_plan, obs.estimated_cost, obs.original_cost, obs.cost_improvement_ratio);
+
+    // Log
+    const errStr  = obs.execution_error || 'null';
+    const logLine = `[STEP] step=${obs.step_number} reward=${reward.toFixed(2)} done=${String(done)} error=${errStr}`;
+    addLogLine(logLine, 'step');
+    state.episodeLog.push(logLine);
+
+    if (done) {
+      const score = state.bestReward;
+      const endLine = `[END] success=${score >= 0.5} steps=${obs.step_number} score=${score.toFixed(3)} rewards=${state.rewards.map(r=>r.toFixed(2)).join(',')}`;
+      addLogLine(endLine, 'end');
+      state.episodeLog.push(endLine);
+      toast(score >= 0.5 ? `Episode complete! Score: ${score.toFixed(3)} ✓` : `Episode done. Score: ${score.toFixed(3)} — try harder next time`, score >= 0.5 ? 'success' : 'error', 5000);
+      btn.disabled = true;
+    } else {
+      toast(`Step ${obs.step_number}: reward ${reward.toFixed(3)}`, reward >= 0.6 ? 'success' : 'info');
+    }
+
+    drawMiniChart();
+
+  } catch(e) {
+    addLogLine(`[ERROR] ${e.message}`, 'err');
+    toast('Step failed: ' + e.message, 'error', 5000);
+  } finally {
+    if (!state.done) {
+      btn.innerHTML = '▶ Submit Query';
+      btn.disabled = false;
+    } else {
+      btn.innerHTML = '▶ Submit Query';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDER FEEDBACK
+// ═══════════════════════════════════════════════════════════════════
+function renderFeedback({ issues_found, hints, passed_checks, description }) {
+  const area = $('paneFeedback');
+  let html = '';
+
+  if (description) {
+    html += `<div style="font-size:.78rem;color:#888;line-height:1.6;padding:4px 0 8px;">${description}</div>`;
+  }
+
+  if (passed_checks && passed_checks.length) {
+    html += `<div class="feedback-section-title">✓ Passed Checks (${passed_checks.length})</div>`;
+    passed_checks.forEach(p => {
+      html += `<div class="passed-item animate-in">✓ ${p}</div>`;
+    });
+  }
+
+  if (issues_found && issues_found.length) {
+    html += `<div class="feedback-section-title" style="margin-top:8px;">⚠ Issues Found (${issues_found.length})</div>`;
+    issues_found.forEach(i => {
+      html += `<div class="issue-item animate-in">${i}</div>`;
+    });
+  } else if (passed_checks && passed_checks.length) {
+    html += `<div class="passed-item animate-in" style="margin-top:4px;">No issues — all checks passing!</div>`;
+  }
+
+  if (hints && hints.length) {
+    html += `<div class="feedback-section-title" style="margin-top:8px;">💡 Optimization Hints</div>`;
+    hints.forEach(h => {
+      html += `<div class="hint-item animate-in">${h}</div>`;
+    });
+  }
+
+  area.innerHTML = html || `<div style="color:#444;font-family:var(--mono);font-size:.78rem;padding-top:20px;text-align:center;">No feedback yet</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  RENDER PLAN
+// ═══════════════════════════════════════════════════════════════════
+function renderPlan(plan, estimated, original, ratio) {
+  const area = $('panePlan');
+  const improvement = ratio ? (ratio > 1 ? `${ratio.toFixed(2)}× faster` : `${ratio.toFixed(2)}× (regressed)`) : '—';
+  const costColor = ratio && ratio > 1 ? 'var(--pass)' : ratio ? 'var(--danger)' : 'var(--mist)';
+
+  area.innerHTML = `
+    <div class="plan-card animate-in">
+      <div class="plan-type">${plan.plan_type}</div>
+      <div class="plan-row"><span>Estimated Cost</span>    <span>${estimated?.toLocaleString() ?? '—'}</span></div>
+      <div class="plan-row"><span>Original Cost</span>     <span>${original?.toLocaleString() ?? '—'}</span></div>
+      <div class="plan-row"><span>Improvement</span>       <span style="color:${costColor};font-weight:600;">${improvement}</span></div>
+      <div class="plan-row"><span>Estimated Rows</span>    <span>${plan.estimated_rows?.toLocaleString() ?? '—'}</span></div>
+      <div class="plan-row"><span>Cost Multiplier</span>   <span>${plan.details?.multiplier ?? '—'}×</span></div>
+    </div>
+    <div style="margin-top:8px;font-size:.7rem;color:#555;font-family:var(--mono);">
+      Plan types: seq_scan (bad) → hash_join → index_scan → window_agg (best)
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  LOG
+// ═══════════════════════════════════════════════════════════════════
+function addLogLine(text, cls = '') {
+  const area = $('paneLog');
+  const div  = document.createElement('div');
+  div.className = 'log-line ' + cls;
+  div.textContent = text;
+  area.appendChild(div);
+  area.scrollTop = area.scrollHeight;
+}
+
+function clearLog() {
+  $('paneLog').innerHTML = '<div class="log-line" style="color:#555;"># Episode log cleared</div>';
+  state.episodeLog = [];
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  MINI CHART (canvas sparkline)
+// ═══════════════════════════════════════════════════════════════════
+function drawMiniChart() {
+  const canvas = $('miniChart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.offsetWidth * devicePixelRatio;
+  const H = 70 * devicePixelRatio;
+  canvas.width  = W;
+  canvas.height = H;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+
+  const w = canvas.offsetWidth;
+  const h = 70;
+
+  ctx.clearRect(0, 0, w, h);
+
+  const rewards = state.rewards;
+  if (!rewards.length) {
+    ctx.fillStyle = '#333';
+    ctx.font = '11px DM Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('No steps yet', w/2, h/2 + 4);
+    return;
+  }
+
+  const pad = 8;
+  const xStep = (w - pad*2) / Math.max(rewards.length - 1, 1);
+  const yScale = (h - pad*2);
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, pad, 0, h - pad);
+  grad.addColorStop(0,   'rgba(94,234,194,.3)');
+  grad.addColorStop(1,   'rgba(94,234,194,.02)');
+
+  ctx.beginPath();
+  rewards.forEach((r, i) => {
+    const x = pad + i * xStep;
+    const y = pad + (1 - Math.max(0, r)) * yScale;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  const lastX = pad + (rewards.length-1) * xStep;
+  ctx.lineTo(lastX, h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  rewards.forEach((r, i) => {
+    const x = pad + i * xStep;
+    const y = pad + (1 - Math.max(0, r)) * yScale;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = 'rgba(94,234,194,.8)';
+  ctx.lineWidth = 2;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Dots
+  rewards.forEach((r, i) => {
+    const x = pad + i * xStep;
+    const y = pad + (1 - Math.max(0, r)) * yScale;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI*2);
+    ctx.fillStyle = r >= 0.5 ? 'var(--pass)' : r >= 0 ? 'var(--accent)' : 'var(--danger)';
+    ctx.fill();
+  });
+
+  // Step labels
+  ctx.fillStyle = '#555';
+  ctx.font = '9px DM Mono, monospace';
+  ctx.textAlign = 'center';
+  rewards.forEach((r, i) => {
+    const x = pad + i * xStep;
+    ctx.fillText(i+1, x, h - 1);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════════════════
+function switchTab(name) {
+  ['feedback','log','plan'].forEach(t => {
+    const pane = $('pane' + t.charAt(0).toUpperCase() + t.slice(1));
+    const btn  = $('tab'  + t.charAt(0).toUpperCase() + t.slice(1));
+    const active = t === name;
+    if (pane) pane.style.display = active ? 'flex' : 'none';
+    if (btn)  btn.style.background = active ? 'rgba(247,194,94,.1)' : '';
+    if (btn)  btn.style.color = active ? 'var(--accent)' : '';
+  });
+  if ($('paneLog')) $('paneLog').style.display = name === 'log' ? 'block' : 'none';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function copyQuery() {
+  const q = $('optimizedQuery').value;
+  if (!q) return;
+  navigator.clipboard.writeText(q).then(() => toast('Query copied', 'success'));
+}
+
+function pasteOriginal() {
+  const orig = $('originalQuery').value;
+  if (!orig) { toast('Reset first to load a task', 'error'); return; }
+  $('optimizedQuery').value = orig;
+  toast('Original pasted into editor', 'info');
+}
+
+function handleEditorKey(e) {
+  // Ctrl+Enter or Cmd+Enter → submit
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    doStep();
+  }
+  // Tab → insert 2 spaces
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const el  = e.target;
+    const s   = el.selectionStart;
+    const end = el.selectionEnd;
+    el.value = el.value.substring(0, s) + '  ' + el.value.substring(end);
+    el.selectionStart = el.selectionEnd = s + 2;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════════════
+(async () => {
+  // Sync server URL input
+  $('serverUrl').addEventListener('change', () => {
+    state.serverUrl = $('serverUrl').value;
+  });
+
+  // Activate feedback tab by default
+  switchTab('feedback');
+
+  // Initial health check
+  await checkHealth();
+  await loadTasks();
+})();
+</script>
+</body>
+</html>
