@@ -38,7 +38,7 @@ COPY openenv.yaml .
 
 # Copy dashboard if present (Person C's output)
 RUN mkdir -p ./dashboard/ || true
-COPY dashboard/ ./dashboard/ 2>/dev/null || true
+COPY dashboard/ ./dashboard/
 
 # Copy setup files
 COPY setup.py .
