@@ -1,12 +1,16 @@
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Body, Request
 from pydantic import BaseModel
 
 from sql_opt_env import SQLOptAction, SQLOptEnv, TASKS
 
 app = FastAPI(title="SQL Query Optimization OpenEnv")
 env = SQLOptEnv()
+
+
+class ResetRequest(BaseModel):
+    task_id: Optional[str] = None
 
 
 class StepRequest(BaseModel):
@@ -45,7 +49,12 @@ def tasks():
 
 
 @app.post("/reset")
-def reset(task_id: Optional[str] = None):
+async def reset(request: Request):
+    try:
+        data = await request.json()
+        task_id = data.get("task_id")
+    except:
+        task_id = None
     observation = env.reset(task_id=task_id)
     return {"observation": observation.model_dump()}
 
