@@ -7,6 +7,17 @@ name = "sql_opt_env"
 version = "0.1.0"
 description = "OpenEnv-compatible SQL query optimization environment"
 requires-python = ">=3.8"
+dependencies = [
+    "fastapi[all]>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "gunicorn>=21.2.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "openenv-core>=0.2.0",
+]
+
+[project.scripts]
+server = "server:app"
 
 [tool.setuptools.packages.find]
 where = ["."]
