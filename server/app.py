@@ -215,7 +215,7 @@ class Env:
         self.last_score = 0.0
         self.t0 = time.time()
 
-    def obs(self, grade=None, reward=0.0, plan="seq_scan",
+    def obs(self, grade=None, reward=0.01, plan="seq_scan",
             est_cost=None, ratio=None, valid=True, err=None):
         return {
             "task_id": self.task_id,
@@ -235,7 +235,7 @@ class Env:
             "passed_checks": grade["passed_checks"] if grade else [],
             "hints": self.task["hints"] if self.step_num <= 3 else [],
             "last_reward": reward,
-            "cumulative_reward": round(self.cumulative, 4),
+            "cumulative_reward": round(max(0.01, min(0.99, self.cumulative)), 4),
         }
 
     def step(self, query: str):
@@ -243,7 +243,7 @@ class Env:
         q = query.strip().upper()
         if not q or not (q.startswith("SELECT") or q.startswith("WITH")) \
                 or q.count("(") != q.count(")"):
-            r = -0.05
+            r = 0.01
             self.cumulative += r
             self.current_query = query
             done = self.step_num >= self.max_steps
