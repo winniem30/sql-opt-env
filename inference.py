@@ -1,12 +1,6 @@
 """
 PERSON B — inference.py
-=======================
-Baseline inference script for the SQL Query Optimization OpenEnv.
-
-Log format (MANDATORY — do not modify):
-    [START] task=<id> env=sql_opt_env model=<model>
-    [STEP]  step=<n> action=<query> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...>
+SQL Query Optimization OpenEnv
 """
 
 import os
@@ -38,9 +32,11 @@ TASK_IDS = [
 
 
 def _clamp(value: float) -> float:
-    """Clamp to strictly (0, 1) — never 0.0 or 1.0 exactly."""
+    """Strictly (0, 1) — never 0.0 or 1.0 exactly."""
     return round(min(max(float(value), 0.01), 0.99), 4)
 
+
+# ── MANDATORY LOG FUNCTIONS ───────────────────────────────────────────────────
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -55,10 +51,13 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     print(f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
 
 
-def log_end(success: bool, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    """MANDATORY format: includes score= field"""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}", flush=True)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
 
+
+# ── PROMPTS ───────────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = textwrap.dedent("""
 You are a senior database engineer and SQL optimization expert.
@@ -69,7 +68,7 @@ OUTPUT RULES — critical:
   - Do NOT wrap in markdown backticks or code blocks.
   - Do NOT add any explanation, preamble, or commentary.
   - The query MUST start with SELECT or WITH
-  - Preserve all WHERE filters from the original (changing filters changes results)
+  - Preserve all WHERE filters from the original
   - Avoid SELECT *, correlated subqueries, unnecessary DISTINCT
   - Use JOINs, CTEs, window functions where appropriate
 """).strip()
@@ -79,10 +78,9 @@ def _format_schemas(obs_dict: dict) -> str:
     schemas = obs_dict.get("schemas", [])
     lines = []
     for s in schemas:
-        lines.append(f"\nTable: {s['name']} ({s['row_count']:,} rows) — {s['description']}")
-        lines.append("Columns:")
+        lines.append(f"\nTable: {s['name']} ({s['row_count']:,} rows)")
         for col in s["columns"]:
-            idx_note = f" [indexed]" if col.get("indexed") else ""
+            idx_note = " [indexed]" if col.get("indexed") else ""
             lines.append(f"  {col['name']}  {col['type']}{idx_note}")
     return "\n".join(lines)
 
@@ -91,15 +89,12 @@ def build_user_prompt(obs_dict: dict, step: int, last_reward: float, history: Li
     issues_block = "\n".join(f"  ⚠  {i}" for i in obs_dict.get("issues_found", []))
     hints_block  = "\n".join(f"  💡 {h}" for h in obs_dict.get("hints", []))
     hist_block   = "\n".join(f"  {h}" for h in history[-3:]) if history else "  (none yet)"
-    cr           = obs_dict.get("cost_improvement_ratio")
-    cost_str     = f"{cr:.2f}x improvement" if cr else "not yet measured"
 
     return textwrap.dedent(f"""
     TASK [{obs_dict.get('difficulty','').upper()}]: {obs_dict.get('task_id','')}
     {obs_dict.get('description','')}
 
-    SCHEMA:
-    {_format_schemas(obs_dict)}
+    SCHEMA: {_format_schemas(obs_dict)}
 
     ORIGINAL QUERY:
     {obs_dict.get('original_query','')}
@@ -107,8 +102,7 @@ def build_user_prompt(obs_dict: dict, step: int, last_reward: float, history: Li
     YOUR CURRENT QUERY (step {step}):
     {obs_dict.get('current_query','')}
 
-    FEEDBACK:
-    Reward: {last_reward:.2f} | Cost: {cost_str}
+    Reward so far: {last_reward:.2f}
     Issues: {issues_block if issues_block else "none"}
     Hints: {hints_block if hints_block else "none"}
     History: {hist_block}
@@ -130,17 +124,13 @@ def get_model_query(client, obs_dict: dict, step: int, last_reward: float, histo
             max_tokens=MAX_TOKENS,
         )
         text = (completion.choices[0].message.content or "").strip()
-
         if text.startswith("```"):
             lines = [l for l in text.split("\n") if not l.strip().startswith("```")]
             text = "\n".join(lines).strip()
-
         if text and (text.upper().startswith("SELECT") or text.upper().startswith("WITH")):
             return text
-
         print(f"[DEBUG] Non-SQL response at step {step}, using current query", flush=True)
         return obs_dict.get("current_query") or obs_dict.get("original_query", "SELECT 1")
-
     except Exception as exc:
         print(f"[DEBUG] LLM call failed at step {step}: {exc}", flush=True)
         return obs_dict.get("current_query") or obs_dict.get("original_query", "SELECT 1")
@@ -151,7 +141,7 @@ def run_task(client: OpenAI, task_id: str) -> dict:
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
-    score = 0.01      # safe default before try
+    score = 0.01
     success = False
 
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
@@ -187,37 +177,35 @@ def run_task(client: OpenAI, task_id: str) -> dict:
         print(f"[DEBUG] Episode error for {task_id}: {exc}", flush=True)
     finally:
         env.close()
-        log_end(success=success, steps=steps_taken, rewards=rewards)
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
     return {"task_id": task_id, "score": score, "success": success, "steps": steps_taken, "rewards": rewards}
 
 
 def main() -> None:
     if not HF_TOKEN:
-        raise RuntimeError("HF_TOKEN environment variable is required for inference.py")
+        raise RuntimeError("HF_TOKEN environment variable is required")
 
     client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
     all_results = []
 
     for task_id in TASK_IDS:
-        print(f"\n{'='*65}", flush=True)
+        print(f"\n{'='*60}", flush=True)
         print(f"  Running: {task_id}", flush=True)
-        print(f"{'='*65}", flush=True)
+        print(f"{'='*60}", flush=True)
         result = run_task(client, task_id)
         all_results.append(result)
 
-    print(f"\n{'='*65}", flush=True)
-    print("  BASELINE SUMMARY", flush=True)
-    print(f"{'-'*65}", flush=True)
-    print(f"  {'Task':<35} {'Score':>7}  {'Steps':>5}  {'Status'}", flush=True)
-    print(f"{'-'*65}", flush=True)
+    print(f"\n{'='*60}", flush=True)
+    print("  SUMMARY", flush=True)
+    print(f"{'-'*60}", flush=True)
     for r in all_results:
         status = "PASS" if r["success"] else "FAIL"
-        print(f"  {r['task_id']:<35} {r['score']:>7.3f}  {r['steps']:>5}  {status}", flush=True)
+        print(f"  {r['task_id']:<35} score={r['score']:.3f}  {status}", flush=True)
     avg = sum(r["score"] for r in all_results) / len(all_results)
-    print(f"{'-'*65}", flush=True)
-    print(f"  {'Average':<35} {avg:>7.3f}", flush=True)
-    print(f"{'='*65}\n", flush=True)
+    print(f"{'-'*60}", flush=True)
+    print(f"  Average score: {avg:.3f}", flush=True)
+    print(f"{'='*60}\n", flush=True)
 
 
 if __name__ == "__main__":
