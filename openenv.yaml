@@ -1,0 +1,77 @@
+name: sql-query-optimizer
+version: "1.0.0"
+description: >
+  An RL environment where AI agents learn to rewrite slow SQL queries into
+  efficient, production-grade ones.
+domain: database-engineering
+tags:
+  - sql
+  - query-optimization
+  - database
+  - data-engineering
+  - real-world
+  - openenv
+server: "server.app:main"
+tasks:
+  - id: select_star_cleanup
+    difficulty: easy
+    description: "Remove SELECT *, unnecessary DISTINCT, add column specificity and is_active filter on 1M-row users table"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users]
+    original_cost: 20000.0
+  - id: n_plus_one_to_join
+    difficulty: medium
+    description: "Convert N+1 correlated subquery in SELECT to JOIN+GROUP BY or CTE on 1M users x 50M orders"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users, orders]
+    original_cost: 2000000.0
+  - id: window_function_rewrite
+    difficulty: hard
+    description: "Replace O(N2) nested correlated subqueries with window functions + CTE pipeline"
+    max_steps: 10
+    success_threshold: 0.70
+    schemas: [users, orders, order_items]
+    original_cost: 1638400000.0
+observation_space:
+  type: object
+  fields:
+    task_id:               {type: string}
+    difficulty:            {type: string}
+    original_query:        {type: string}
+    current_query:         {type: string}
+    step_number:           {type: integer}
+    max_steps:             {type: integer}
+    syntax_valid:          {type: boolean}
+    issues_found:          {type: array}
+    hints:                 {type: array}
+    last_reward:           {type: float}
+    cumulative_reward:     {type: float}
+action_space:
+  type: object
+  fields:
+    query:
+      type: string
+      required: true
+    explanation:
+      type: string
+      required: false
+reward:
+  range: [-0.05, 1.0]
+  shaped: true
+  dense: true
+endpoints:
+  health: "GET /health"
+  tasks: "GET /tasks"
+  reset: "POST /reset"
+  step: "POST /step"
+  state: "GET /state"
+docker:
+  image: sql-opt-env
+  port: 7860
+  base: python:3.11-slim
+huggingface:
+  space_sdk: docker
+  suggested_hardware: cpu-basic
+  tags: [openenv, sql, rl-environment]
