@@ -332,16 +332,12 @@ def state():
                          "status": "ok"})
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# REQUIRED BY openenv validate: server:main entry point
-# openenv.yaml must have:  server: "server:main"
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ── REQUIRED BY openenv validate ──────────────────────────────────────────────
 def main():
-    """Main entry point referenced by openenv.yaml as server:main"""
+    """Entry point: openenv.yaml → server: 'server:main' """
     import uvicorn
     port = int(os.getenv("PORT", 7860))
-    print(f"[server] SQL Opt Env v2.0.0 on port {port}", flush=True)
+    print(f"[server] SQL Opt Env v2.0.0 starting on port {port}", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
