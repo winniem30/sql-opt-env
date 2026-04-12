@@ -93,7 +93,7 @@ def _grade(task_id: str, query: str) -> dict:
     q = query.strip().upper()
     issues, passed, parts = [], [], {}
     if not (q.startswith("SELECT") or q.startswith("WITH")):
-        return {"score": 0.0, "issues": ["Not a SELECT/WITH statement"], "passed_checks": []}
+        return {"score": 0.01, "issues": ["Not a SELECT/WITH statement"], "passed_checks": []}
 
     if task_id == "select_star_cleanup":
         if "SELECT *" not in q:
@@ -181,8 +181,9 @@ def _grade(task_id: str, query: str) -> dict:
         else:
             issues.append("Join order_items for order_total")
 
-    return {"score": round(min(1.0, sum(parts.values())), 3),
-            "issues": issues, "passed_checks": passed}
+    raw = round(sum(parts.values()), 3)
+    score = max(0.01, min(0.99, raw))
+    return {"score": score, "issues": issues, "passed_checks": passed}
 
 
 def _cost(query: str, task_id: str) -> float:
@@ -258,7 +259,7 @@ class Env:
         delta = gs - self.last_score
         progress = (min(delta, 0.10) if delta > 0.05 else
                     -0.03 if delta < -0.10 else 0.0)
-        r = round(min(max(gs * 0.6 + (min(ratio, 10) / 10) * 0.3 + progress, 0.0), 1.0), 4)
+        r = round(min(max(gs * 0.6 + (min(ratio, 10) / 10) * 0.3 + progress, 0.01), 0.99), 4)
         self.current_query = query
         self.cumulative += r
         self.last_score = gs
@@ -343,7 +344,6 @@ def state():
                          "status": "ok"})
 
 
-# openenv validator requires 'main' to be the FastAPI app object
 def main():
     import uvicorn
     port = int(os.getenv("PORT", 7860))
