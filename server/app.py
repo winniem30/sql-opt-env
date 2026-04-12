@@ -1,11 +1,6 @@
 """
 server/app.py - SQL Query Optimization OpenEnv
-Entry point: server.app:main  (referenced in openenv.yaml)
-
-The openenv validator specifically checks:
-  1. server/app.py exists
-  2. def main() exists in server/app.py
-  3. if __name__ == '__main__': main() exists in server/app.py
+Entry point: server.app:main
 """
 
 import os
@@ -104,7 +99,7 @@ def _grade(task_id: str, query: str) -> dict:
         if "SELECT *" not in q:
             parts["a"] = 0.25; passed.append("Removed SELECT *")
         else:
-            issues.append("Still using SELECT * — fetches unused TEXT columns")
+            issues.append("Still using SELECT *")
         if "DISTINCT" not in q:
             parts["b"] = 0.15; passed.append("Removed DISTINCT")
         else:
@@ -348,22 +343,11 @@ def state():
                          "status": "ok"})
 
 
-# =============================================================================
-# REQUIRED BY openenv validate — DO NOT REMOVE OR RENAME
-# The validator checks for BOTH of these exactly as written:
-#   1. def main():
-#   2. if __name__ == '__main__':
-# =============================================================================
-
-# Keep all your routes using @application.xxx as they are
-# Just add these two lines at the very bottom:
-
-app = application   # __init__.py imports 'app'
-main = application  # openenv validator expects 'main'
+# openenv validator requires 'main' to be the FastAPI app object
+main = app
 
 if __name__ == '__main__':
     import uvicorn
     port = int(os.getenv("PORT", 7860))
-    print(f"[server.app] starting on port {port}", flush=True)
-    uvicorn.run(application, host="0.0.0.0", port=port, log_level="info")
-
+    print(f"[server.app] SQL Opt Env v2.0.0 starting on port {port}", flush=True)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
