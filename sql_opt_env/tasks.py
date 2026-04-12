@@ -4,6 +4,11 @@ from typing import Dict, List
 from .models import ColumnSchema, TableSchema
 
 
+def _clamp(value: float) -> float:
+    """Clamp to strictly (0, 1) — never 0.0 or 1.0 exactly."""
+    return round(min(max(float(value), 0.01), 0.99), 4)
+
+
 def normalize_query(query: str) -> str:
     return " ".join(query.strip().split()).upper()
 
@@ -28,7 +33,7 @@ class Task:
         normalized = normalize_query(query)
 
         if not normalized.startswith(("SELECT", "WITH")):
-            return {"score": 0.0}
+            return {"score": _clamp(0.0)}   # FIX: was 0.0 exactly
 
         if self.id == "select_star_cleanup":
             score = 0.0
@@ -38,7 +43,7 @@ class Task:
                 score += 0.3
             if any(column in normalized for column in ["USERNAME", "EMAIL", "ID"]):
                 score += 0.3
-            return {"score": min(score, 1.0)}
+            return {"score": _clamp(score)}   # FIX: was min(score, 1.0)
 
         if self.id == "n_plus_one_to_join":
             score = 0.1
@@ -48,7 +53,7 @@ class Task:
                 score += 0.3
             if not contains_any(normalized, ["IN (SELECT", "EXISTS (SELECT"]):
                 score += 0.2
-            return {"score": min(score, 1.0)}
+            return {"score": _clamp(score)}   # FIX: was min(score, 1.0)
 
         if self.id == "window_function_rewrite":
             score = 0.1
@@ -58,9 +63,9 @@ class Task:
                 score += 0.2
             if not contains_any(normalized, ["IN (SELECT", "EXISTS (SELECT"]):
                 score += 0.2
-            return {"score": min(score, 1.0)}
+            return {"score": _clamp(score)}   # FIX: was min(score, 1.0)
 
-        return {"score": 0.0}
+        return {"score": _clamp(0.0)}   # FIX: was 0.0 exactly
 
     def issues(self, query: str, previous_query: str) -> List[str]:
         normalized = normalize_query(query)
