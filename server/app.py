@@ -230,7 +230,7 @@ class Env:
             "query_plan": {"plan_type": plan, "estimated_cost": est_cost or 0},
             "estimated_cost": est_cost,
             "original_cost": self.orig_cost,
-            "cost_improvement_ratio": ratio,
+            "cost_improvement_ratio": round(max(0.01, min(0.99, ratio)), 3) if ratio is not None else None,
             "issues_found": grade["issues"] if grade else [],
             "passed_checks": grade["passed_checks"] if grade else [],
             "hints": self.task["hints"] if self.step_num <= 3 else [],
@@ -253,7 +253,7 @@ class Env:
         grade = _grade(self.task_id, query)
         gs = grade["score"]
         ec = _cost(query, self.task_id)
-        ratio = round(self.orig_cost / max(ec, 1.0), 3)
+        ratio = round(min(0.99, max(0.01, self.orig_cost / max(ec, 1.0))), 3)
         plan = ("window_agg" if "OVER" in q else "hash_join" if "JOIN" in q
                 else "seq_scan" if "SELECT *" in q else "index_scan")
         delta = gs - self.last_score
