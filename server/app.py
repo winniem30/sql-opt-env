@@ -347,7 +347,6 @@ def state():
 def main():
     import uvicorn
     port = int(os.getenv("PORT", 7860))
-    print(f"[server.app] SQL Opt Env v2.0.0 starting on port {port}", flush=True)
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 if __name__ == '__main__':
