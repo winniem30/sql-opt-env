@@ -48,4 +48,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
         | grep -q '"task_id"' || exit 1
 
 # Run server.py directly — it has main() and all endpoints
-CMD ["python", "server.py"]
+CMD ["uvicorn", "server:main", "--host", "0.0.0.0", "--port", "7860"]
