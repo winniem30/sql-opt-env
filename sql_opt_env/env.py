@@ -6,7 +6,7 @@ from .tasks import TASKS, simulate_cost
 
 
 def _clamp(value: float) -> float:
-    """Clamp reward/score to strictly (0, 1) — never 0.0 or 1.0 exactly."""
+    """Clamp to strictly (0, 1) — never 0.0 or 1.0 exactly."""
     return round(min(max(float(value), 0.01), 0.99), 4)
 
 
@@ -54,11 +54,11 @@ class SQLOptEnv:
 
         if destructive:
             execution_error = "Destructive or non-query action rejected."
-            reward = _clamp(-0.05)   # FIX: was -0.05 (could be out of range)
+            reward = _clamp(0.01)
             done = True
             info = {
                 "cost_improvement": 0.0,
-                "grade_score": 0.0,
+                "grade_score": 0.01,
                 "execution_error": execution_error,
                 "syntax_valid": False,
             }
@@ -66,30 +66,30 @@ class SQLOptEnv:
 
         if not syntax_valid:
             execution_error = "Query must start with SELECT or WITH."
-            reward = _clamp(-0.05)   # FIX: was -0.05 (could be out of range)
+            reward = _clamp(0.01)
             done = self.steps >= self.max_steps
             info = {
                 "cost_improvement": 0.0,
-                "grade_score": 0.0,
+                "grade_score": 0.01,
                 "execution_error": execution_error,
                 "syntax_valid": False,
             }
             self.current_query = candidate_query
             return self._build_observation(execution_error=execution_error, syntax_valid=False), reward, done, info
 
-        grade_score = self.task.grade(candidate_query)["score"]
+        grade_score = _clamp(self.task.grade(candidate_query)["score"])
         old_cost = self.current_cost
         new_cost = simulate_cost(candidate_query, self.task)
         cost_improvement = max(0.0, old_cost - new_cost)
 
-        progress_bonus = max(0.0, grade_score - self.task.grade(self.current_query)["score"])
+        prev_grade_score = _clamp(self.task.grade(self.current_query)["score"])
+        progress_bonus = max(0.0, grade_score - prev_grade_score)
         cost_component = min(max(cost_improvement / max(1.0, self.task.original_cost), 0.0), 1.0)
         reward = 0.6 * grade_score + 0.3 * cost_component + 0.1 * progress_bonus
 
         if candidate_query == self.current_query:
             reward = reward - 0.02
 
-        # FIX: was min(max(reward, 0.0), 1.0) which allowed exactly 0.0 and 1.0
         reward = _clamp(reward)
 
         self.current_query = candidate_query
@@ -100,7 +100,7 @@ class SQLOptEnv:
         done = self.steps >= self.max_steps or grade_score >= self.task.success_threshold
         info = {
             "cost_improvement": round(cost_improvement, 2),
-            "grade_score": round(_clamp(grade_score), 4),
+            "grade_score": round(grade_score, 4),
             "execution_error": execution_error,
             "syntax_valid": syntax_valid,
         }
