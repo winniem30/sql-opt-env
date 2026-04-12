@@ -1,7 +1,6 @@
 FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="SQL Query Optimization OpenEnv"
-LABEL org.opencontainers.image.description="OpenEnv RL environment for SQL query optimization"
 LABEL org.opencontainers.image.version="2.0.0"
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser
@@ -16,7 +15,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
-# Copy ALL source — server/ folder is critical
+# Copy source code
 COPY sql_opt_env/ ./sql_opt_env/
 COPY server/ ./server/
 COPY server.py .
@@ -29,6 +28,9 @@ RUN mkdir -p ./dashboard/
 COPY dashboard/ ./dashboard/
 
 RUN pip install --no-cache-dir -e . --no-deps
+
+# Create __init__.py to make server a proper Python package
+RUN echo "from .app import app, main\n__all__ = ['app', 'main']" > /app/server/__init__.py
 
 RUN chown -R appuser:appuser /app
 USER appuser
@@ -45,5 +47,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
         -d '{"task_id":"select_star_cleanup"}' \
         | grep -q '"task_id"' || exit 1
 
-# Matches openenv.yaml: server: "server.app:main"
-CMD ["python", "-c", "from server.app import main; main()"]
+# Run server.py directly — it has main() and all endpoints
+CMD ["python", "server.py"]
