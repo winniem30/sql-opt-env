@@ -257,8 +257,8 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             if done:
                 break
 
-        score = max(rewards) if rewards else 0.0
-        score = min(max(score, 0.0), 1.0)
+        raw_score = max(rewards) if rewards else 0.001
+        score = min(max(float(raw_score), 0.001), 0.999)   # ← strictly (0, 1)
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
