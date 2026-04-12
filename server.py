@@ -123,7 +123,7 @@ def state():
     out["status"] = "ok"
     return JSONResponse(content=out)
 
-
+main=app
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 7860))
