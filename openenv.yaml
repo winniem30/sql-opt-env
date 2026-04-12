@@ -3,7 +3,6 @@ version: "1.0.0"
 description: >
   An RL environment where AI agents learn to rewrite slow SQL queries into
   efficient, production-grade ones.
-
 domain: database-engineering
 tags:
   - sql
@@ -11,28 +10,23 @@ tags:
   - database
   - real-world
   - openenv
-
-server: "server.app:main"
-
+server: "server:main"
 tasks:
   - id: select_star_cleanup
     difficulty: easy
     description: "Remove SELECT *, unnecessary DISTINCT, add column specificity and is_active filter"
     max_steps: 10
     success_threshold: 0.70
-
   - id: n_plus_one_to_join
     difficulty: medium
     description: "Convert N+1 correlated subquery in SELECT to JOIN+GROUP BY or CTE"
     max_steps: 10
     success_threshold: 0.70
-
   - id: window_function_rewrite
     difficulty: hard
     description: "Replace O(N2) nested correlated subqueries with window functions and CTEs"
     max_steps: 10
     success_threshold: 0.70
-
 observation_space:
   type: object
   fields:
@@ -47,7 +41,6 @@ observation_space:
     hints: {type: array}
     last_reward: {type: float}
     cumulative_reward: {type: float}
-
 action_space:
   type: object
   fields:
@@ -57,12 +50,10 @@ action_space:
     explanation:
       type: string
       required: false
-
 reward:
   range: [-0.05, 1.0]
   shaped: true
   dense: true
-
 endpoints:
   health: "GET /health"
   tasks: "GET /tasks"
