@@ -355,16 +355,11 @@ def state():
 #   2. if __name__ == '__main__':
 # =============================================================================
 
-def main():
-    """
-    Main entry point required by openenv validate.
-    openenv.yaml must declare:  server: "server.app:main"
-    """
-    import uvicorn
-    port = int(os.getenv("PORT", 7860))
-    print(f"[server.app] SQL Opt Env v2.0.0 starting on port {port}", flush=True)
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
-
+main = application  # validator expects this to be the FastAPI app object
 
 if __name__ == '__main__':
-    main()
+    import uvicorn
+    port = int(os.getenv("PORT", 7860))
+    print(f"[server.app] starting on port {port}", flush=True)
+    uvicorn.run(application, host="0.0.0.0", port=port, log_level="info")
+
