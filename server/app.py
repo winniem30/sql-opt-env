@@ -355,7 +355,11 @@ def state():
 #   2. if __name__ == '__main__':
 # =============================================================================
 
-main = application  # validator expects this to be the FastAPI app object
+# Keep all your routes using @application.xxx as they are
+# Just add these two lines at the very bottom:
+
+app = application   # __init__.py imports 'app'
+main = application  # openenv validator expects 'main'
 
 if __name__ == '__main__':
     import uvicorn
