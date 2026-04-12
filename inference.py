@@ -236,7 +236,7 @@ def run_task(client: OpenAI, task_id: str) -> dict:
     try:
         observation = env.reset()
         obs_dict = observation.model_dump()
-        last_reward = 0.0
+        last_reward = 0.01
 
         for step_num in range(1, MAX_STEPS + 1):
             query = get_model_query(client, obs_dict, step_num, last_reward, history)
