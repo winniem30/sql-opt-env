@@ -2,25 +2,6 @@
 PERSON B — inference.py
 =======================
 Baseline inference script for the SQL Query Optimization OpenEnv.
-
-Runs an LLM agent (via OpenAI-compatible API) against all 3 tasks
-and emits the mandatory [START]/[STEP]/[END] log format.
-
-Usage:
-    export HF_TOKEN=your_key
-    export API_BASE_URL=https://router.huggingface.co/v1
-    export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
-    python inference.py
-
-Environment variables:
-    API_BASE_URL    LLM endpoint (default: HuggingFace router)
-    MODEL_NAME      Model identifier (default: Qwen2.5-72B)
-    HF_TOKEN        API key (also checked as API_KEY)
-
-Log format (MANDATORY — do not modify):
-    [START] task=<id> env=sql_opt_env model=<model>
-    [STEP]  step=<n> action=<query> reward=<0.00> done=<true|false> error=<msg|null>
-    [END]   success=<true|false> steps=<n> rewards=<r1,r2,...>
 """
 
 import os
@@ -30,22 +11,19 @@ from typing import List, Optional
 
 from openai import OpenAI
 
-# ── Path setup ────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Environment ───────────────────────────────────────────────────────────────
 from sql_opt_env import SQLOptEnv, SQLOptAction
 
-# ── Configuration ─────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")
 
 BENCHMARK         = "sql_opt_env"
-MAX_STEPS         = 6        # Stay well within 20-min budget
-TEMPERATURE       = 0.2      # Low temperature for deterministic SQL
-MAX_TOKENS        = 800      # Enough for a complex CTE
-SUCCESS_THRESHOLD = 0.5      # Score >= 0.5 → success
+MAX_STEPS         = 6
+TEMPERATURE       = 0.2
+MAX_TOKENS        = 800
+SUCCESS_THRESHOLD = 0.5
 
 TASK_IDS = [
     "select_star_cleanup",
@@ -54,17 +32,16 @@ TASK_IDS = [
 ]
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  MANDATORY LOG FUNCTIONS — do not change format
-# ═════════════════════════════════════════════════════════════════════════════
+def _clamp(value: float) -> float:
+    """Clamp to strictly (0, 1) — never 0.0 or 1.0 exactly."""
+    return round(min(max(float(value), 0.01), 0.99), 4)
+
 
 def log_start(task: str, env: str, model: str) -> None:
-    """Emit [START] line at episode begin."""
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
-    """Emit [STEP] line after every env.step() call."""
     action_clean = action.replace("\n", " ").replace("\r", "").strip()
     if len(action_clean) > 300:
         action_clean = action_clean[:297] + "..."
@@ -78,17 +55,12 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 
 
 def log_end(success: bool, steps: int, rewards: List[float]) -> None:
-    """Emit [END] line after env.close(), always — even on exception."""
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} rewards={rewards_str}",
         flush=True,
     )
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  LLM PROMPTS
-# ═════════════════════════════════════════════════════════════════════════════
 
 SYSTEM_PROMPT = textwrap.dedent("""
 You are a senior database engineer and SQL optimization expert.
@@ -117,7 +89,6 @@ OUTPUT RULES — critical:
 
 
 def _format_schemas(obs_dict: dict) -> str:
-    """Format schema info into a readable string for the prompt."""
     schemas = obs_dict.get("schemas", [])
     lines = []
     for s in schemas:
@@ -130,7 +101,6 @@ def _format_schemas(obs_dict: dict) -> str:
 
 
 def build_user_prompt(obs_dict: dict, step: int, last_reward: float, history: List[str]) -> str:
-    """Build the per-step user prompt with full context."""
     issues_block = "\n".join(f"  ⚠  {i}" for i in obs_dict.get("issues_found", []))
     hints_block  = "\n".join(f"  💡 {h}" for h in obs_dict.get("hints", []))
     hist_block   = "\n".join(f"  {h}" for h in history[-3:]) if history else "  (none yet)"
@@ -172,18 +142,7 @@ def build_user_prompt(obs_dict: dict, step: int, last_reward: float, history: Li
     """).strip()
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  LLM CALL
-# ═════════════════════════════════════════════════════════════════════════════
-
-def get_model_query(
-    client,
-    obs_dict: dict,
-    step: int,
-    last_reward: float,
-    history: List[str],
-) -> str:
-    """Call the LLM and return a clean SQL string."""
+def get_model_query(client, obs_dict: dict, step: int, last_reward: float, history: List[str]) -> str:
     prompt = build_user_prompt(obs_dict, step, last_reward, history)
     try:
         completion = client.chat.completions.create(
@@ -197,16 +156,13 @@ def get_model_query(
         )
         text = (completion.choices[0].message.content or "").strip()
 
-        # Strip markdown fences if model ignores output rules
         if text.startswith("```"):
             lines = [l for l in text.split("\n") if not l.strip().startswith("```")]
             text = "\n".join(lines).strip()
 
-        # Validate it looks like SQL before returning
         if text and (text.upper().startswith("SELECT") or text.upper().startswith("WITH")):
             return text
 
-        # Fallback: return current query unchanged
         print(f"[DEBUG] Model returned non-SQL response, falling back to current query", flush=True)
         return obs_dict.get("current_query") or obs_dict.get("original_query", "SELECT 1")
 
@@ -215,27 +171,13 @@ def get_model_query(
         return obs_dict.get("current_query") or obs_dict.get("original_query", "SELECT 1")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-#  TASK RUNNER
-# ═════════════════════════════════════════════════════════════════════════════
-
-def _clamp_score(value: float) -> float:
-    """Clamp score to strictly (0, 1) — never 0.0 or 1.0 exactly."""
-    return round(min(max(float(value), 0.01), 0.99), 4)
-
-
 def run_task(client: OpenAI, task_id: str) -> dict:
-    """
-    Run one complete episode against a task.
-    Emits [START], [STEP]×N, [END] to stdout.
-    Returns a summary dict.
-    """
     env = SQLOptEnv(task_id=task_id)
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
 
-    # ── FIX: initialise score/success BEFORE try so except/finally always has them ──
+    # Safe defaults — must exist before try block so finally always works
     score = 0.01
     success = False
 
@@ -252,8 +194,8 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             obs = observation
             error = info.get("execution_error")
 
-            # ── FIX: clamp every individual reward too ──
-            reward = _clamp_score(reward)
+            # Clamp every individual reward strictly within (0, 1)
+            reward = _clamp(reward)
 
             rewards.append(reward)
             steps_taken = step_num
@@ -268,14 +210,12 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             if done:
                 break
 
-        # ── FIX: clamp final score strictly within (0, 1) ──
         raw_score = max(rewards) if rewards else 0.01
-        score = _clamp_score(raw_score)
+        score = _clamp(raw_score)
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
         print(f"[DEBUG] Episode error for {task_id}: {exc}", flush=True)
-        # score and success already set to safe defaults above
     finally:
         env.close()
         log_end(success=success, steps=steps_taken, rewards=rewards)
@@ -288,10 +228,6 @@ def run_task(client: OpenAI, task_id: str) -> dict:
         "rewards": rewards,
     }
 
-
-# ═════════════════════════════════════════════════════════════════════════════
-#  MAIN
-# ═════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
     if not HF_TOKEN:
@@ -307,7 +243,6 @@ def main() -> None:
         result = run_task(client, task_id)
         all_results.append(result)
 
-    # Summary table
     print(f"\n{'═'*65}", flush=True)
     print("  BASELINE SUMMARY", flush=True)
     print(f"{'─'*65}", flush=True)
