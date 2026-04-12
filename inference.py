@@ -219,6 +219,11 @@ def get_model_query(
 #  TASK RUNNER
 # ═════════════════════════════════════════════════════════════════════════════
 
+def _clamp_score(value: float) -> float:
+    """Clamp score to strictly (0, 1) — never 0.0 or 1.0 exactly."""
+    return round(min(max(float(value), 0.01), 0.99), 4)
+
+
 def run_task(client: OpenAI, task_id: str) -> dict:
     """
     Run one complete episode against a task.
@@ -229,6 +234,9 @@ def run_task(client: OpenAI, task_id: str) -> dict:
     history: List[str] = []
     rewards: List[float] = []
     steps_taken = 0
+
+    # ── FIX: initialise score/success BEFORE try so except/finally always has them ──
+    score = 0.01
     success = False
 
     log_start(task=task_id, env=BENCHMARK, model=MODEL_NAME)
@@ -244,6 +252,9 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             obs = observation
             error = info.get("execution_error")
 
+            # ── FIX: clamp every individual reward too ──
+            reward = _clamp_score(reward)
+
             rewards.append(reward)
             steps_taken = step_num
             last_reward = reward
@@ -257,12 +268,14 @@ def run_task(client: OpenAI, task_id: str) -> dict:
             if done:
                 break
 
-        raw_score = max(rewards) if rewards else 0.001
-        score = min(max(float(raw_score), 0.001), 0.999)   # ← strictly (0, 1)
+        # ── FIX: clamp final score strictly within (0, 1) ──
+        raw_score = max(rewards) if rewards else 0.01
+        score = _clamp_score(raw_score)
         success = score >= SUCCESS_THRESHOLD
 
     except Exception as exc:
         print(f"[DEBUG] Episode error for {task_id}: {exc}", flush=True)
+        # score and success already set to safe defaults above
     finally:
         env.close()
         log_end(success=success, steps=steps_taken, rewards=rewards)
