@@ -1,12 +1,3 @@
----
-title: SQL Query Optimization OpenEnv
-emoji: 🗄️
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-pinned: false
----
-
 # 🗄️ SQL Query Optimization Environment
 
 **Team Marvel** | Meta PyTorch Hackathon × Scaler School of Technology
